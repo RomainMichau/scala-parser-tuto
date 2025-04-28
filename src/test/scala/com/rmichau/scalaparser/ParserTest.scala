@@ -1,15 +1,16 @@
-import com.rmichau.scalaparser.Combinators.*
+package com.rmichau.scalaparser
+
+import cats.data.Validated.{Invalid, Valid}
 import cats.data.{ValidatedNec, ValidatedNel}
-import cats.data.Validated.Valid
-import cats.data.Validated.Invalid
+import com.rmichau.scalaparser.Combinators.*
 import com.rmichau.scalaparser.instances.DateParser
-import com.rmichau.scalaparser.{POption, PSeq, PString, ParseResult, Parser, Token}
+import com.rmichau.scalaparser.{POption, PSeq, PString, ParseResult, Parser, TokenTmp}
 
 // For more information on writing tests, see
 // https://scalameta.org/munit/docs/getting-started.html
-class MySuite extends munit.FunSuite {
+class ParserTest extends munit.FunSuite {
 
-  def toTokens(st: String) = st.split(" ").map(Token(_))
+  def toTokens(st: String) = st.split(" ").map(TokenTmp(_))
 
   def assertSuccess[R](result: ParseResult[R]): Unit = {
     result match
@@ -41,7 +42,7 @@ class MySuite extends munit.FunSuite {
   val optionalThe: Parser[POption] = OPTION(the)
   val theBook: Parser[PSeq] = SEQUENCE(Seq(optionalThe, book))
   test("Test tokenize") {
-    assertEquals(tokenise("Hello World"), Seq(Token("hello"), Token("world")))
+    assertEquals(tokenise("Hello World"), Seq(TokenTmp("hello"), TokenTmp("world")))
   }
   test("Test sequence") {
     assertSuccess(helloWorld(tokens, 0))
