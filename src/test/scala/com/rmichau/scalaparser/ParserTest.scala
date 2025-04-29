@@ -26,10 +26,10 @@ class ParserTest extends munit.FunSuite {
   val world = STRING("world")
   val the = IDENT("the")
   val book = IDENT("book")
-  val helloWorld: Parser[PNeSeq] = SEQ(hello, world)
+  val helloWorld: Parser[PNeSeq[PString]] = SEQ(hello, world)
   val helloOrWorld: Parser[PString] = ANY_OF(Seq(hello, world))
-  val optionalThe: Parser[POption] = OPTION(the)
-  val theBook: Parser[PNeSeq] = SEQ(optionalThe, book)
+  val optionalThe: Parser[POption[PString]] = OPTION(the)
+  val theBook: Parser[PNeSeq[Product]] = SEQ(optionalThe, book)
   test("Test sequence") {
     assertSuccess(helloWorld(tokens, 0))
     assertFailure(helloWorld(tokens2, 0))
@@ -79,10 +79,10 @@ class ParserTest extends munit.FunSuite {
   test("tuple") {
     val hello = IDENT("hello")
     val maybeJohn = OPTION(IDENT("john"))
-    val res: ParseResult[(PString, POption)] = TUPLE(hello, maybeJohn)(Lexer.tokenize("hello john"), 0)
+    val res: ParseResult[(PString, POption[PString])] = TUPLE(hello, maybeJohn)(Lexer.tokenize("hello john"), 0)
     assertResult(res, (PString("hello"),POption(Some(PString("john")))))
   }
-  
+
   test("loop") {
     val loopParser = LOOP(IDENT("hello"))
     val loopParser3 = LOOP(IDENT("hello"), 3)

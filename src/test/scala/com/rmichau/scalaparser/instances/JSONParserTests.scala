@@ -1,6 +1,6 @@
 package com.rmichau.scalaparser.instances
 import com.rmichau.scalaparser.TestCommon.*
-import com.rmichau.scalaparser.instances.JSONParser.{JKey, JString}
+import com.rmichau.scalaparser.instances.JSONParser.{JArray, JKey, JString}
 class JSONParserTests extends munit.FunSuite {
   test("key parser") {
     val res=JSONParser.JKEY("\"key\":".tokenize, 0)
@@ -12,15 +12,14 @@ class JSONParserTests extends munit.FunSuite {
     assertResult(res, JString("the value"))
   }
   test ("tes") {
-    val res = JSONParser.teststuff("\"bro\":]".tokenize, 0)
-    println(res)
   }
-//
-//  test ("array") {
-//    val res = JSONParser.JARRAY(
-//      """
-//        |["an","array"]
-//        |""".stripMargin.tokenize, 0)
-//    println(res)
-//  }
+
+  test ("array") {
+    val res = JSONParser.JARRAY(
+      """
+        |["an","array","with elems"]
+        |""".stripMargin.tokenize, 0)
+    assertResult(res, JArray(List(JString("an"), JString("array"), JString("with elems")))
+    )
+  }
 }

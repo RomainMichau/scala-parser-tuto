@@ -14,27 +14,25 @@ object Main {
 
 type ParseResult[R] = ValidatedNec[String, (Int, R)]
 
-trait PObject {
-  def toPseq = PSeq(Seq(this))
+case class PString(value: String)
 
-  def toPNeseq = PNeSeq(NonEmptySeq.one(this))
+case class PInt(value: Int)
+
+case class PSeq[T](value: Seq[T]) {
+  def append(obj: T): PSeq[T] = PSeq(value :+ obj)
 }
 
-case class PString(value: String) extends PObject
-
-case class PInt(value: Int) extends PObject
-
-case class PSeq(value: Seq[PObject]) extends PObject {
-  def append(obj: PObject): PSeq = PSeq(value :+ obj)
+object PNeSeq {
+  def one[T](elem: T): PNeSeq[T] = PNeSeq(NonEmptySeq.one(elem))
 }
 
-case class PNeSeq(value: NonEmptySeq[PObject]) extends PObject {
-  def append(obj: PObject): PNeSeq = PNeSeq(value :+ obj)
+case class PNeSeq[T](value: NonEmptySeq[T]) {
+  def append(obj: T): PNeSeq[T] = PNeSeq(value :+ obj)
 }
 
-case class POption(value: Option[PObject]) extends PObject
+case class POption[T](value: Option[T])
 
-object PEOS extends PObject
+object PEOS
 
 case class Parser[R](f: (tokens: Seq[Token], idx: Int) => ParseResult[R], expecting: String) {
   def apply(tokens: Seq[Token], idx: Int): ParseResult[R] = f(tokens, idx)
@@ -47,7 +45,7 @@ object ParserImplicit {
         (tokens: Seq[Token], idx: Int) => {
           fa(tokens, idx) match {
             case Valid((next, obj1)) => f(obj1)(tokens, next)
-            case inv@Invalid(_) => inv
+            case inv @ Invalid(_)    => inv
           }
         },
         expecting = fa.expecting
@@ -61,8 +59,8 @@ object ParserImplicit {
           def step(a: A, idx: Int): ParseResult[B] = {
             f(a)(tokens, idx) match {
               case Valid((nextIdx, Left(nextA))) => step(nextA, nextIdx)
-              case Valid((nextIdx, Right(b))) => Valid((nextIdx, b))
-              case i@Invalid(_) => i
+              case Valid((nextIdx, Right(b)))    => Valid((nextIdx, b))
+              case i @ Invalid(_)                => i
             }
           }
 
@@ -79,9 +77,7 @@ object ParserImplicit {
       )
     }
 
-    override def pure[A](x: A): Parser[A] = Parser(
-      (tokens: Seq[Token], idx: Int) => Valid((idx, x)),
-      "pure parser")
+    override def pure[A](x: A): Parser[A] = Parser((tokens: Seq[Token], idx: Int) => Valid((idx, x)), "pure parser")
   }
 }
 
@@ -95,7 +91,7 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TInt(w)) if w == int => Validated.valid((idx + 1, PInt(w)))
-          case _ => tooShort
+          case _                         => tooShort
         },
       expecting = s"int $int"
     )
@@ -106,8 +102,8 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TString(w)) if w == string => Validated.valid((idx + 1, PString(w)))
-          case Some(w) => Validated.invalidNec(s"Expected $string, got $w")
-          case _ => tooShort
+          case Some(w)                         => Validated.invalidNec(s"Expected $string, got $w")
+          case _                               => tooShort
         },
       expecting = s"$string"
     )
@@ -118,7 +114,7 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TString(w)) => Validated.valid((idx + 1, PString(w)))
-          case _ => tooShort
+          case _                => tooShort
         },
       expecting = s"Any string"
     )
@@ -129,8 +125,8 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TIdent(w)) if w == ident => Validated.valid((idx + 1, PString(w)))
-          case Some(w) => Validated.invalidNec(s"Expected IDENT $ident, got $w")
-          case _ => tooShort
+          case Some(w)                       => Validated.invalidNec(s"Expected IDENT $ident, got $w")
+          case _                             => tooShort
         },
       expecting = s"$ident"
     )
@@ -141,8 +137,8 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TSymbol(w)) if w == symbol => Validated.valid((idx + 1, PString(w)))
-          case Some(w) => Validated.invalidNec(s"Expected $symbol, got $w")
-          case _ => tooShort
+          case Some(w)                         => Validated.invalidNec(s"Expected $symbol, got $w")
+          case _                               => tooShort
         },
       expecting = s"$symbol"
     )
@@ -150,32 +146,33 @@ object Combinators {
 
   import ParserImplicit.given
 
-  def SEQ(head: Parser[? <: PObject], tail: Parser[? <: PObject]*): Parser[PNeSeq] = {
-    tail.foldLeft(head.map(_.toPNeseq)) { (acc, parser) =>
+  def SEQ[T](head: Parser[? <: T], tail: Parser[? <: T]*): Parser[PNeSeq[T]] = {
+    tail.foldLeft(head.map(PNeSeq.one)) { (acc, parser) =>
       for {
         seq <- acc
-        b <- parser
+        b   <- parser
       } yield seq.append(b)
     }
   }
 
-  def LOOP[T <: PObject](parser: Parser[T], minIteration: Int = 0): Parser[PSeq] = {
+  def LOOP[T](parser: Parser[T], minIteration: Int = 0): Parser[PSeq[T]] = {
     @tailrec
-    def loop(tokens: Seq[Token], idx: Int, acc: List[PObject], roundToMakeMin: Int): ParseResult[PSeq] = {
+    def loop(tokens: Seq[Token], idx: Int, acc: List[T], roundToMakeMin: Int): ParseResult[PSeq[T]] = {
       parser(tokens, idx) match {
         case Valid((nextIdx, value)) =>
           loop(tokens, nextIdx, value :: acc, roundToMakeMin - 1)
         case Invalid(e) if roundToMakeMin <= 0 =>
           Valid((idx, PSeq(acc.reverse)))
-        case inv@Invalid(_) =>
+        case inv @ Invalid(_) =>
           Invalid(NonEmptyChain(s"Not enough iteration of ${parser.expecting}. Expecting $minIteration iteration"))
       }
     }
+
     Parser((tokens, idx) => loop(tokens, idx, Nil, minIteration), expecting = s"Loop of ${parser.expecting}")
   }
 
   // TODO opimize
-  def ANY_OF[T <: PObject](parsers: Seq[Parser[T]]): Parser[T] = {
+  def ANY_OF[T](parsers: Seq[Parser[T]]): Parser[T] = {
     Parser(
       (tokens: Seq[Token], idx: Int) => {
         parsers.find(p => p(tokens, idx).isValid) match {
@@ -190,12 +187,12 @@ object Combinators {
     )
   }
 
-  def OPTION[T <: PObject](parser: Parser[T]): Parser[POption] = {
+  def OPTION[T](parser: Parser[T]): Parser[POption[T]] = {
     Parser(
       (tokens: Seq[Token], idx: Int) => {
         parser(tokens, idx) match {
           case Validated.Valid((next, v)) => Validated.valid((next, POption(Option(v))))
-          case Validated.Invalid(_) => Validated.valid((idx, POption(None)))
+          case Validated.Invalid(_)       => Validated.valid((idx, POption(None)))
         }
       },
       expecting = s"Optional ${parser.expecting}"
@@ -212,10 +209,9 @@ object Combinators {
     )
   }
 
-  def TUPLE[Parsers <: Tuple, Results <: Tuple](parsers: Parsers)(
-    using seq: TupleSequencer[Parsers, Results]
+  def TUPLE[Parsers <: Tuple, Results <: Tuple](parsers: Parsers)(using
+      seq: TupleSequencer[Parsers, Results]
   ): Parser[Results] = seq.apply(parsers)
-
 
   trait TupleSequencer[Parsers <: Tuple, Results <: Tuple] {
     def apply(parsers: Parsers): Parser[Results]
@@ -229,17 +225,14 @@ object Combinators {
       def apply(parsers: EmptyTuple): Parser[EmptyTuple] = EmptyTuple.pure
     }
 
-    given cons[H <: PObject, T <: Tuple, RT <: Tuple](using
-                                                      tail: TupleSequencer[T, RT]
-                                                     ): TupleSequencer[Parser[H] *: T, H *: RT] with
+    given cons[H, T <: Tuple, RT <: Tuple](using
+        tail: TupleSequencer[T, RT]
+    ): TupleSequencer[Parser[H] *: T, H *: RT] with
       def apply(parsers: Parser[H] *: T): Parser[H *: RT] = {
-        val head = parsers.head
+        val head       = parsers.head
         val tailParsed = tail(parsers.tail)
         (head, tailParsed).mapN(_ *: _)
       }
 
   }
 }
-
-
-
