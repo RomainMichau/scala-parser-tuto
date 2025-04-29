@@ -4,6 +4,7 @@ import cats.data.Validated.{Invalid, Valid}
 import cats.data.{NonEmptyChain, NonEmptySeq, Validated, ValidatedNec}
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
+import cats.syntax.applicative.*
 
 import scala.annotation.tailrec
 
@@ -15,6 +16,7 @@ type ParseResult[R] = ValidatedNec[String, (Int, R)]
 
 trait PObject {
   def toPseq = PSeq(Seq(this))
+
   def toPNeseq = PNeSeq(NonEmptySeq.one(this))
 }
 
@@ -37,8 +39,9 @@ object PEOS extends PObject
 case class Parser[R](f: (tokens: Seq[Token], idx: Int) => ParseResult[R], expecting: String) {
   def apply(tokens: Seq[Token], idx: Int): ParseResult[R] = f(tokens, idx)
 }
+
 object ParserImplicit {
-  given ParserOps: cats.FlatMap[Parser] with {
+  given ParserOps: cats.Monad[Parser] with {
     override def flatMap[A, B](fa: Parser[A])(f: A => Parser[B]): Parser[B] = {
       Parser(
         (tokens: Seq[Token], idx: Int) => {
@@ -75,8 +78,13 @@ object ParserImplicit {
         expecting = fa.expecting
       )
     }
+
+    override def pure[A](x: A): Parser[A] = Parser(
+      (tokens: Seq[Token], idx: Int) => Valid((idx, x)),
+      "pure parser")
   }
 }
+
 object Combinators {
   private val tooShort = Validated.invalidNec(s"Input too short")
 
@@ -87,7 +95,7 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TInt(w)) if w == int => Validated.valid((idx + 1, PInt(w)))
-          case _                                      => tooShort
+          case _ => tooShort
         },
       expecting = s"int $int"
     )
@@ -98,8 +106,8 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) =>
         tokens.lift(idx) match {
           case Some(TString(w)) if w == string => Validated.valid((idx + 1, PString(w)))
-          case Some(w)        => Validated.invalidNec(s"Expected $string, got $w")
-          case _                                => tooShort
+          case Some(w) => Validated.invalidNec(s"Expected $string, got $w")
+          case _ => tooShort
         },
       expecting = s"$string"
     )
@@ -142,25 +150,12 @@ object Combinators {
 
   import ParserImplicit.given
 
-  def NESEQUENCE(parsers: NonEmptySeq[Parser[? <: PObject]]): Parser[PNeSeq] = {
-    parsers.tail.foldLeft(parsers.head.map(_.toPNeseq)) { (acc, parser) =>
+  def SEQ(head: Parser[? <: PObject], tail: Parser[? <: PObject]*): Parser[PNeSeq] = {
+    tail.foldLeft(head.map(_.toPNeseq)) { (acc, parser) =>
       for {
         seq <- acc
         b <- parser
       } yield seq.append(b)
-    }
-  }
-  
-  def SEQUENCE(parsers: Seq[Parser[? <: PObject]]): Parser[PSeq] = {
-    parsers match {
-      case Seq() => Parser((tokens, idx) => Validated.valid((idx, PSeq(Seq()))), "empty sequence")
-      case head +: tail =>
-        tail.foldLeft(head.map(_.toPseq)) { (acc, parser) =>
-          for {
-            seq <- acc
-            b   <- parser
-          } yield seq.append(b)
-        }
     }
   }
 
@@ -172,11 +167,10 @@ object Combinators {
           loop(tokens, nextIdx, value :: acc, roundToMakeMin - 1)
         case Invalid(e) if roundToMakeMin <= 0 =>
           Valid((idx, PSeq(acc.reverse)))
-        case inv @ Invalid(_) =>
+        case inv@Invalid(_) =>
           Invalid(NonEmptyChain(s"Not enough iteration of ${parser.expecting}. Expecting $minIteration iteration"))
       }
     }
-
     Parser((tokens, idx) => loop(tokens, idx, Nil, minIteration), expecting = s"Loop of ${parser.expecting}")
   }
 
@@ -201,7 +195,7 @@ object Combinators {
       (tokens: Seq[Token], idx: Int) => {
         parser(tokens, idx) match {
           case Validated.Valid((next, v)) => Validated.valid((next, POption(Option(v))))
-          case Validated.Invalid(_)       => Validated.valid((idx, POption(None)))
+          case Validated.Invalid(_) => Validated.valid((idx, POption(None)))
         }
       },
       expecting = s"Optional ${parser.expecting}"
@@ -217,4 +211,35 @@ object Combinators {
       expecting = "EOS"
     )
   }
+
+  def TUPLE[Parsers <: Tuple, Results <: Tuple](parsers: Parsers)(
+    using seq: TupleSequencer[Parsers, Results]
+  ): Parser[Results] = seq.apply(parsers)
+
+
+  trait TupleSequencer[Parsers <: Tuple, Results <: Tuple] {
+    def apply(parsers: Parsers): Parser[Results]
+  }
+
+  object TupleSequencer {
+
+    import cats.syntax.apply.*
+
+    given empty: TupleSequencer[EmptyTuple, EmptyTuple] {
+      def apply(parsers: EmptyTuple): Parser[EmptyTuple] = EmptyTuple.pure
+    }
+
+    given cons[H <: PObject, T <: Tuple, RT <: Tuple](using
+                                                      tail: TupleSequencer[T, RT]
+                                                     ): TupleSequencer[Parser[H] *: T, H *: RT] with
+      def apply(parsers: Parser[H] *: T): Parser[H *: RT] = {
+        val head = parsers.head
+        val tailParsed = tail(parsers.tail)
+        (head, tailParsed).mapN(_ *: _)
+      }
+
+  }
 }
+
+
+

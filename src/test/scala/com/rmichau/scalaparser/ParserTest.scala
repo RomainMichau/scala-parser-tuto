@@ -3,7 +3,9 @@ package com.rmichau.scalaparser
 import cats.data.Validated.{Invalid, Valid}
 import cats.data.{ValidatedNec, ValidatedNel}
 import com.rmichau.scalaparser.Combinators.*
+import com.rmichau.scalaparser.TestCommon.*
 import com.rmichau.scalaparser.instances.DateParser
+import com.rmichau.scalaparser.instances.JSONParser.JString
 import com.rmichau.scalaparser.{POption, PSeq, PString, ParseResult, Parser}
 
 // For more information on writing tests, see
@@ -12,21 +14,8 @@ class ParserTest extends munit.FunSuite {
 
   def toTokens(st: String) = Lexer.tokenize(st)
 
-  def assertSuccess[R](result: ParseResult[R]): Unit = {
-    result match
-      case Valid(next) => assert(true)
-      case Invalid(err) => assert(false, s"unexpected error: ${err.toNonEmptyList.toList.mkString("\n")}")
-  }
 
-  def assertSuccess[R](result: ParseResult[R], expectedNext: Int): Unit = {
-    result match
-      case Valid((next, _)) => assertEquals(next, expectedNext)
-      case Invalid(err) => assert(false, s"unexpected error: $err")
-  }
 
-  def assertFailure[R](result: ParseResult[R]): Unit = {
-    assert(result.isInvalid)
-  }
 
   val tokens = Lexer.tokenize("\"hello\" \"world\" my name is Romain")
   val tokens2 = Lexer.tokenize("hello paris my name is Romain")
@@ -37,10 +26,10 @@ class ParserTest extends munit.FunSuite {
   val world = STRING("world")
   val the = IDENT("the")
   val book = IDENT("book")
-  val helloWorld: Parser[PSeq] = SEQUENCE(Seq(hello, world))
+  val helloWorld: Parser[PNeSeq] = SEQ(hello, world)
   val helloOrWorld: Parser[PString] = ANY_OF(Seq(hello, world))
   val optionalThe: Parser[POption] = OPTION(the)
-  val theBook: Parser[PSeq] = SEQUENCE(Seq(optionalThe, book))
+  val theBook: Parser[PNeSeq] = SEQ(optionalThe, book)
   test("Test sequence") {
     assertSuccess(helloWorld(tokens, 0))
     assertFailure(helloWorld(tokens2, 0))
@@ -71,7 +60,7 @@ class ParserTest extends munit.FunSuite {
   test("any String") {
     val res = ANY_STRING()(Lexer.tokenize("\"what\" time is it"), 0)
     assertSuccess(res)
-    assertEquals(res.getOrElse(throw new Exception())._2.value, "what")
+    assertResult(res, PString("what"))
 
     assertFailure(ANY_STRING()(Lexer.tokenize("what time is it"), 0))
   }
@@ -87,6 +76,13 @@ class ParserTest extends munit.FunSuite {
     assertSuccess(DateParser.parse(validDate, 0))
   }
 
+  test("tuple") {
+    val hello = IDENT("hello")
+    val maybeJohn = OPTION(IDENT("john"))
+    val res: ParseResult[(PString, POption)] = TUPLE(hello, maybeJohn)(Lexer.tokenize("hello john"), 0)
+    assertResult(res, (PString("hello"),POption(Some(PString("john")))))
+  }
+  
   test("loop") {
     val loopParser = LOOP(IDENT("hello"))
     val loopParser3 = LOOP(IDENT("hello"), 3)
@@ -94,7 +90,7 @@ class ParserTest extends munit.FunSuite {
     assertSuccess(loopParser(tokens, 0))
     assertSuccess(loopParser3(toTokens("hello hello hello romain"), 0))
     assertFailure(loopParser4(toTokens("hello hello hello romain"), 0))
-    val loopComplex = LOOP(SEQUENCE(Seq(ANY_OF(Seq(IDENT("hello"), IDENT("hi"))),IDENT("romain"))), 2)
+    val loopComplex = LOOP(SEQ(ANY_OF(Seq(IDENT("hello"), IDENT("hi"))),IDENT("romain")), 2)
     assertFailure(loopComplex(toTokens("hello romain"), 0))
     assertSuccess(loopComplex(toTokens("hello romain hello romain"), 0))
     assertSuccess(loopComplex(toTokens("hi romain hello romain hi romain"), 0))

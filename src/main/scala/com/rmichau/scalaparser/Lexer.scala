@@ -45,7 +45,7 @@ object Lexer {
     finalState.tokens
   }
 
-  private val symbols = ",<>+-*/=()[]{}!@#$%^&|~;:?{}".toSet
+  private val symbols = ",<>+-*/=()[]{}!@#$%^&|~;:?".toSet
   private val space   = ' '
 
   private def isSymbol(char: Char): Boolean = symbols.contains(char)

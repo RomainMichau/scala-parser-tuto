@@ -12,7 +12,7 @@ object DateParser {
   val DOM        = ANY_OF((1 to 31).map(INT))
   val YEAR       = ANY_OF((1996 until 2002).map(INT))
   val /          = ANY_OF(Seq(SYMBOL("/"), SYMBOL("-")))
-  val dateParser = SEQUENCE(Seq(DOM, /, MONTHS, /, YEAR))
+  val dateParser = SEQ(DOM, /, MONTHS, /, YEAR)
 
   def parse = dateParser
 }
