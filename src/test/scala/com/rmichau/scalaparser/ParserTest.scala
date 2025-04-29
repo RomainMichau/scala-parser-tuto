@@ -4,13 +4,13 @@ import cats.data.Validated.{Invalid, Valid}
 import cats.data.{ValidatedNec, ValidatedNel}
 import com.rmichau.scalaparser.Combinators.*
 import com.rmichau.scalaparser.instances.DateParser
-import com.rmichau.scalaparser.{POption, PSeq, PString, ParseResult, Parser, TokenTmp}
+import com.rmichau.scalaparser.{POption, PSeq, PString, ParseResult, Parser}
 
 // For more information on writing tests, see
 // https://scalameta.org/munit/docs/getting-started.html
 class ParserTest extends munit.FunSuite {
 
-  def toTokens(st: String) = st.split(" ").map(TokenTmp(_))
+  def toTokens(st: String) = Lexer.tokenize(st)
 
   def assertSuccess[R](result: ParseResult[R]): Unit = {
     result match
@@ -28,22 +28,19 @@ class ParserTest extends munit.FunSuite {
     assert(result.isInvalid)
   }
 
-  val tokens = tokenise("hello world my name is Romain")
-  val tokens2 = tokenise("hello paris my name is Romain")
-  val tokens3 = tokenise("the book")
-  val tokens4 = tokenise("book")
+  val tokens = Lexer.tokenize("\"hello\" \"world\" my name is Romain")
+  val tokens2 = Lexer.tokenize("hello paris my name is Romain")
+  val tokens3 = Lexer.tokenize("the book")
+  val tokens4 = Lexer.tokenize("book")
 
   val hello = STRING("hello")
   val world = STRING("world")
-  val the = STRING("the")
-  val book = STRING("book")
+  val the = IDENT("the")
+  val book = IDENT("book")
   val helloWorld: Parser[PSeq] = SEQUENCE(Seq(hello, world))
   val helloOrWorld: Parser[PString] = ANY_OF(Seq(hello, world))
   val optionalThe: Parser[POption] = OPTION(the)
   val theBook: Parser[PSeq] = SEQUENCE(Seq(optionalThe, book))
-  test("Test tokenize") {
-    assertEquals(tokenise("Hello World"), Seq(TokenTmp("hello"), TokenTmp("world")))
-  }
   test("Test sequence") {
     assertSuccess(helloWorld(tokens, 0))
     assertFailure(helloWorld(tokens2, 0))
@@ -56,9 +53,9 @@ class ParserTest extends munit.FunSuite {
   }
 
   test("optionnal") {
-    assertSuccess(theBook(tokenise("the book"), 0), 2)
-    assertSuccess(theBook(tokenise("book"), 0), 1)
-    assertFailure(theBook(tokenise("stuff"), 0))
+    assertSuccess(theBook(Lexer.tokenize("the book"), 0), 2)
+    assertSuccess(theBook(Lexer.tokenize("book"), 0), 1)
+    assertFailure(theBook(Lexer.tokenize("stuff"), 0))
   }
 
   test("eos") {
@@ -66,20 +63,38 @@ class ParserTest extends munit.FunSuite {
     assertFailure(EOS(tokens3, 1))
   }
 
+  test("ident") {
+    assertSuccess(IDENT("hello")(Lexer.tokenize("hello my name is"), 0))
+    assertFailure(IDENT("hello")(Lexer.tokenize("\"hello\" my name is"), 0))
+  }
+
+  test("any String") {
+    val res = ANY_STRING()(Lexer.tokenize("\"what\" time is it"), 0)
+    assertSuccess(res)
+    assertEquals(res.getOrElse(throw new Exception())._2.value, "what")
+
+    assertFailure(ANY_STRING()(Lexer.tokenize("what time is it"), 0))
+  }
+
+  test("symbol") {
+    assertSuccess(SYMBOL("/")(Lexer.tokenize("/ 1213"), 0))
+    assertFailure(SYMBOL("/")(Lexer.tokenize("/ 1213"), 3))
+  }
+
   test("date") {
-    val validDate = tokenise("31 / Jan / 1996")
+    val validDate = Lexer.tokenize("31 / jan / 1996")
     val res = DateParser.parse(validDate, 0)
     assertSuccess(DateParser.parse(validDate, 0))
   }
 
   test("loop") {
-    val loopParser = LOOP(STRING("hello"))
-    val loopParser3 = LOOP(STRING("hello"), 3)
-    val loopParser4 = LOOP(STRING("hello"), 4)
+    val loopParser = LOOP(IDENT("hello"))
+    val loopParser3 = LOOP(IDENT("hello"), 3)
+    val loopParser4 = LOOP(IDENT("hello"), 4)
     assertSuccess(loopParser(tokens, 0))
     assertSuccess(loopParser3(toTokens("hello hello hello romain"), 0))
     assertFailure(loopParser4(toTokens("hello hello hello romain"), 0))
-    val loopComplex = LOOP(SEQUENCE(Seq(ANY_OF(Seq(STRING("hello"), STRING("hi"))),STRING("romain"))), 2)
+    val loopComplex = LOOP(SEQUENCE(Seq(ANY_OF(Seq(IDENT("hello"), IDENT("hi"))),IDENT("romain"))), 2)
     assertFailure(loopComplex(toTokens("hello romain"), 0))
     assertSuccess(loopComplex(toTokens("hello romain hello romain"), 0))
     assertSuccess(loopComplex(toTokens("hi romain hello romain hi romain"), 0))
