@@ -1,100 +1,141 @@
 package com.rmichau.scalaparser
 
-import cats.data.Validated.{Invalid, Valid}
-import cats.data.{ValidatedNec, ValidatedNel}
 import com.rmichau.scalaparser.Combinators.*
 import com.rmichau.scalaparser.TestCommon.*
-import com.rmichau.scalaparser.instances.DateParser
-import com.rmichau.scalaparser.instances.JSONParser.JString
-import com.rmichau.scalaparser.{POption, PSeq, PString, ParseResult, Parser}
 
 // For more information on writing tests, see
 // https://scalameta.org/munit/docs/getting-started.html
 class ParserTest extends munit.FunSuite {
 
-  def toTokens(st: String) = Lexer.tokenize(st)
+  def toTokens(st: String) = (st)
 
+  val tokens2 = "hello paris my name is Romain"
 
+  test("char") {
+    CHAR('h')("hello").assertSuccess('h')
+    CHAR('e')("hello").assertFailure()
+    CHAR_IN(Set('a', 'c', 'h'))("hello").assertSuccess('h')
+    CHAR_IN(Set('a', 'c', 'h'))("bye").assertFailure()
+    CHAR_IN(Set('a', 'c', 'h'))("").assertFailure()
+  }
 
+  test("ALHPA") {
+    ALPHA()("hello").assertSuccess('h')
+  }
 
-  val tokens = Lexer.tokenize("\"hello\" \"world\" my name is Romain")
-  val tokens2 = Lexer.tokenize("hello paris my name is Romain")
-  val tokens3 = Lexer.tokenize("the book")
-  val tokens4 = Lexer.tokenize("book")
+  test("WS") {
+    WS1("  a  lot of      whitespace").assertSuccess(' ')
+  }
 
-  val hello = STRING("hello")
-  val world = STRING("world")
-  val the = IDENT("the")
-  val book = IDENT("book")
-  val helloWorld: Parser[PNeSeq[PString]] = SEQ(hello, world)
-  val helloOrWorld: Parser[PString] = ANY_OF(Seq(hello, world))
-  val optionalThe: Parser[POption[PString]] = OPTION(the)
-  val theBook: Parser[PNeSeq[Product]] = SEQ(optionalThe, book)
+  test("WORD") {
+    WORD("hello")("hello world").assertSuccess("hello")
+    WORD("he")("hello world").assertSuccess("he")
+    WORD()("hello world").assertSuccess("hello")
+    WORD_WS()("hello   world").assertSuccess("hello   ")
+    WORD_WS("the")("the hello from  earth").assertSuccess()
+  }
+
+  test("WORD_WS0") {
+    WORD_WS0("hello")("hello         world").assertSuccess("hello")
+    WORD_WS0("hi")("hello         world").assertFailure()
+    WORD_WS0("hello")("oops").assertFailure()
+
+    WORD_WS0()("hello").assertSuccess()
+  }
+
+  test("WORDS") {
+    WORDS()("these  are several   words").assertSuccess("these  are several   words")
+    println(WORDS().expecting)
+  }
+
+  test("BETWEEN") {
+    BETWEEN(CHAR(';'), WORDS(), CHAR(','))(";hel lo,").assertSuccess("hel lo")
+  }
+
+  test("QUOTED STRING") {
+    QUOTED_STRING()("\"this is a quoted string\"").assertSuccess("this is a quoted string")
+  }
+
   test("Test sequence") {
-    assertSuccess(helloWorld(tokens, 0))
-    assertFailure(helloWorld(tokens2, 0))
+    val hello      = QUOTED_STRING("hello")
+    val world      = QUOTED_STRING("world")
+    val helloWorld = SEQ(hello, world)
+    helloWorld("\"hello\"\"world\" my name is Romain").assertSuccess()
+    helloWorld(tokens2, 0).assertFailure()
   }
 
   test("or") {
-    assertSuccess(helloOrWorld(tokens, 0))
-    assertSuccess(helloOrWorld(tokens, 1))
-    assertFailure(helloOrWorld(tokens, 3))
+    val helloOrWorld = ANY_OF(Seq(QUOTED_STRING("hello"), QUOTED_STRING("world")))
+    helloOrWorld("\"hello\" \"world\" my name is Romain", 0).assertSuccess()
+    helloOrWorld("\"hello\" \"world\" my name is Romain", 1).assertFailure()
+    helloOrWorld("\"hello\" \"world\" my name is Romain", 3).assertFailure()
   }
 
   test("optionnal") {
-    assertSuccess(theBook(Lexer.tokenize("the book"), 0), 2)
-    assertSuccess(theBook(Lexer.tokenize("book"), 0), 1)
-    assertFailure(theBook(Lexer.tokenize("stuff"), 0))
+    val the         = WORD_WS("the")
+    val book        = WORD_WS("book")
+    val optionalThe = OPTION(the)
+    val theBook     = SEQ(optionalThe, book)
+
+    theBook("the book").assertSuccess()
+    theBook("book").assertSuccess()
+    theBook("stuff").assertFailure()
   }
 
   test("eos") {
-    assertSuccess(EOS(tokens3, 2))
-    assertFailure(EOS(tokens3, 1))
+    EOS("the book", 8).assertSuccess()
+    EOS("book", 2).assertFailure()
   }
 
-  test("ident") {
-    assertSuccess(IDENT("hello")(Lexer.tokenize("hello my name is"), 0))
-    assertFailure(IDENT("hello")(Lexer.tokenize("\"hello\" my name is"), 0))
+  test("TUPLE") {
+    val hello     = WORD_WS("hello")
+    val maybeJohn = OPTION(WORD_WS("john"))
+    val res       = TUPLE(hello, maybeJohn)("hello john", 0)
+    res.assertSuccess(("hello ", Some("john")))
   }
 
-  test("any String") {
-    val res = ANY_STRING()(Lexer.tokenize("\"what\" time is it"), 0)
-    assertSuccess(res)
-    assertResult(res, PString("what"))
-
-    assertFailure(ANY_STRING()(Lexer.tokenize("what time is it"), 0))
+  test("REPEAT") {
+    val loopParser  = REPEAT(WORD_WS("hello"))
+    val loopParser3 = REPEAT(WORD_WS("hello"), 3)
+    val loopParser4 = REPEAT(WORD_WS("hello"), 4)
+    loopParser("\"hello\" \"world\" my name is romain", 0).assertSuccess()
+    loopParser3(toTokens("hello hello hello romain"), 0).assertSuccess()
+    loopParser4(toTokens("hello hello hello romain"), 0).assertFailure()
+    val loopComplex = REPEAT(SEQ(ANY_OF(Seq(WORD_WS("hello"), WORD_WS("hi"))), WORD_WS("romain")), 2)
+    loopComplex(toTokens("hello romain"), 0).assertFailure()
+    loopComplex(toTokens("hello romain hello romain"), 0).assertSuccess()
+    loopComplex(toTokens("hi romain hello romain hi romain"), 0).assertSuccess()
+    loopComplex(toTokens("hi romain hello romain hi bro"), 0).assertSuccess()
+    loopComplex(toTokens("hi romain nope romain hi bro"), 0).assertFailure()
   }
 
-  test("symbol") {
-    assertSuccess(SYMBOL("/")(Lexer.tokenize("/ 1213"), 0))
-    assertFailure(SYMBOL("/")(Lexer.tokenize("/ 1213"), 3))
+  test("REPEAT_SEPARATOR") {
+    val repeatParser = REPEAT_SEPARATOR(WORD("hello"), CHAR(','))
+    repeatParser("hello,hello,hello").assertSuccess()
+    repeatParser("hello,hi,hello").assertSuccess(Seq("hello"))
+
+    val repeatParser2 = REPEAT_SEPARATOR(WORD("hello"), CHAR(','), 2)
+    repeatParser2("hello,").assertFailure()
+    repeatParser2("hi").assertFailure()
+    repeatParser2("hello,hello").assertFailure()
   }
 
-  test("date") {
-    val validDate = Lexer.tokenize("31 / jan / 1996")
-    val res = DateParser.parse(validDate, 0)
-    assertSuccess(DateParser.parse(validDate, 0))
+  test("tailRecM") {
+    import cats.syntax.flatMap.*
+    import cats.syntax.functor.*
+    import com.rmichau.scalaparser.ParserImplicit.given
+    val p = "1".tailRecM(st => {
+      WORD(st).map(s => if (s.length < 5) Left(s :+ '1') else Right(s))
+    })
+    p("111111111111111111111111").assertSuccess()
+    p("1").assertFailure()
   }
 
-  test("tuple") {
-    val hello = IDENT("hello")
-    val maybeJohn = OPTION(IDENT("john"))
-    val res: ParseResult[(PString, POption[PString])] = TUPLE(hello, maybeJohn)(Lexer.tokenize("hello john"), 0)
-    assertResult(res, (PString("hello"),POption(Some(PString("john")))))
-  }
-
-  test("loop") {
-    val loopParser = LOOP(IDENT("hello"))
-    val loopParser3 = LOOP(IDENT("hello"), 3)
-    val loopParser4 = LOOP(IDENT("hello"), 4)
-    assertSuccess(loopParser(tokens, 0))
-    assertSuccess(loopParser3(toTokens("hello hello hello romain"), 0))
-    assertFailure(loopParser4(toTokens("hello hello hello romain"), 0))
-    val loopComplex = LOOP(SEQ(ANY_OF(Seq(IDENT("hello"), IDENT("hi"))),IDENT("romain")), 2)
-    assertFailure(loopComplex(toTokens("hello romain"), 0))
-    assertSuccess(loopComplex(toTokens("hello romain hello romain"), 0))
-    assertSuccess(loopComplex(toTokens("hi romain hello romain hi romain"), 0))
-    assertSuccess(loopComplex(toTokens("hi romain hello romain hi bro"), 0))
-    assertFailure(loopComplex(toTokens("hi romain nope romain hi bro"), 0))
+  test("bimap") {
+    import cats.syntax.bifunctor.*
+    import com.rmichau.scalaparser.ParserImplicit.given
+    val p = WORD("hello").bimap(_ => "error TEST", _ => "success TEST")
+    p("hi").assertFailure("error TEST")
+    p("hello").assertSuccess("success TEST")
   }
 }

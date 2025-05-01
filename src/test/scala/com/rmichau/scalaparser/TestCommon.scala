@@ -1,34 +1,27 @@
 package com.rmichau.scalaparser
 
 import cats.data.Validated.{Invalid, Valid}
-import munit.Assertions.assertEquals
+import munit.Assertions.{assertEquals, fail}
 
 object TestCommon {
 
-  def assertResult[R](result: ParseResult[R], expected: R): Unit = {
-    assert(result.isValid, "result is expected to be validd")
-    result.map((_, res) => assertEquals(res, expected))
-  }
+  extension [R](p: ParseResultSt[R]) {
+    def assertSuccess(r: R): Unit = p match {
+      case Valid(_, res) => assertEquals(res, r)
+      case _             => fail("expect valid result")
+    }
 
+    def assertFailure(): Unit = assert(p.isInvalid, "expect invalid ParseResult")
 
-  def assertSuccess[R](result: ParseResult[R]): Unit = {
-    result match
-      case Valid(next) => assert(true)
-      case Invalid(err) => assert(false, s"unexpected error: ${err.toNonEmptyList.toList.mkString("\n")}")
-  }
+    def assertFailure(r: String): Unit = p match {
+      case Invalid(e) => assertEquals(e.head, r)
+      case _          => fail("expect invalid result")
+    }
 
-  def assertSuccess[R](result: ParseResult[R], expectedNext: Int): Unit = {
-    result match
-      case Valid((next, _)) => assertEquals(next, expectedNext)
-      case Invalid(err) => assert(false, s"unexpected error: $err")
-  }
-
-  def assertFailure[R](result: ParseResult[R]): Unit = {
-    assert(result.isInvalid)
-  }
-  
-  extension (s: String) {
-    def tokenize = Lexer.tokenize(s)
+    def assertSuccess(): Unit = p match {
+      case Invalid(e) => fail(s"expect valid ParseResult. Got error $e")
+      case _          =>
+    }
   }
 
 }

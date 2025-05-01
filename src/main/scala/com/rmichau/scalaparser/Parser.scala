@@ -4,45 +4,29 @@ import cats.data.Validated.{Invalid, Valid}
 import cats.data.{NonEmptyChain, NonEmptySeq, Validated, ValidatedNec}
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
-import cats.syntax.applicative.*
+import com.rmichau.scalaparser.ParserImplicit.given
 
 import scala.annotation.tailrec
 
-object Main {
-  def main(args: Array[String]): Unit = {}
-}
+type ParseResult[E, R] = ValidatedNec[E, (Int, R)]
 
-type ParseResult[R] = ValidatedNec[String, (Int, R)]
+type ParseResultSt[R] = ValidatedNec[String, (Int, R)]
+type ParserStE[R]     = Parser[String, R]
 
-case class PString(value: String)
-
-case class PInt(value: Int)
-
-case class PSeq[T](value: Seq[T]) {
-  def append(obj: T): PSeq[T] = PSeq(value :+ obj)
-}
-
-object PNeSeq {
-  def one[T](elem: T): PNeSeq[T] = PNeSeq(NonEmptySeq.one(elem))
-}
-
-case class PNeSeq[T](value: NonEmptySeq[T]) {
-  def append(obj: T): PNeSeq[T] = PNeSeq(value :+ obj)
-}
-
-case class POption[T](value: Option[T])
-
-object PEOS
-
-case class Parser[R](f: (tokens: Seq[Token], idx: Int) => ParseResult[R], expecting: String) {
-  def apply(tokens: Seq[Token], idx: Int): ParseResult[R] = f(tokens, idx)
+case class Parser[E, R](f: (String, Int) => ParseResult[E, R], expecting: String) {
+  def apply(str: String, idx: Int = 0): ParseResult[E, R] = f(str, idx)
 }
 
 object ParserImplicit {
-  given ParserOps: cats.Monad[Parser] with {
-    override def flatMap[A, B](fa: Parser[A])(f: A => Parser[B]): Parser[B] = {
+  given ParserOps[E]: cats.Monad[[R] =>> Parser[E, R]]
+    with cats.Semigroupal[[R] =>> Parser[E, R]]
+    with cats.Bifunctor[Parser]
+    with {
+    override def pure[A](x: A): Parser[E, A] = Parser((_: String, idx: Int) => Valid((idx, x)), "pure parser")
+
+    override def flatMap[R, R2](fa: Parser[E, R])(f: R => Parser[E, R2]): Parser[E, R2] = {
       Parser(
-        (tokens: Seq[Token], idx: Int) => {
+        (tokens: String, idx: Int) => {
           fa(tokens, idx) match {
             case Valid((next, obj1)) => f(obj1)(tokens, next)
             case inv @ Invalid(_)    => inv
@@ -52,11 +36,11 @@ object ParserImplicit {
       )
     }
 
-    override def tailRecM[A, B](a: A)(f: A => Parser[Either[A, B]]): Parser[B] = {
+    override def tailRecM[A, B](a: A)(f: A => Parser[E, Either[A, B]]): Parser[E, B] = {
       Parser(
         (tokens, idx) => {
           @tailrec
-          def step(a: A, idx: Int): ParseResult[B] = {
+          def step(a: A, idx: Int): ParseResult[E, B] = {
             f(a)(tokens, idx) match {
               case Valid((nextIdx, Left(nextA))) => step(nextA, nextIdx)
               case Valid((nextIdx, Right(b)))    => Valid((nextIdx, b))
@@ -70,84 +54,75 @@ object ParserImplicit {
       )
     }
 
-    override def map[A, B](fa: Parser[A])(f: A => B): Parser[B] = {
+    override def bimap[E1, R1, E2, R2](parser: Parser[E1, R1])(g: E1 => E2, f: R1 => R2): Parser[E2, R2] = {
       Parser(
-        (tokens: Seq[Token], idx: Int) => fa(tokens, idx).map { case (i, r) => (i, f(r)) },
-        expecting = fa.expecting
+        (tokens, idx) => {
+          parser(tokens, idx).bimap(nec => nec.map(g), (idx, res) => (idx, f(res)))
+        },
+        "bimap"
       )
     }
-
-    override def pure[A](x: A): Parser[A] = Parser((tokens: Seq[Token], idx: Int) => Valid((idx, x)), "pure parser")
   }
 }
 
 object Combinators {
-  private val tooShort = Validated.invalidNec(s"Input too short")
 
   // TODO
   // contravariant of word
-  def INT(int: Int): Parser[PInt] = {
+
+  def CHAR(char: Char): ParserStE[Char] = {
     Parser(
-      (tokens: Seq[Token], idx: Int) =>
-        tokens.lift(idx) match {
-          case Some(TInt(w)) if w == int => Validated.valid((idx + 1, PInt(w)))
-          case _                         => tooShort
+      (str: String, idx: Int) =>
+        str.lift(idx) match {
+          case Some(w) if w == char => Validated.valid((idx + 1, w))
+          case Some(w)              => Validated.invalidNec(s"Missing CHAR($char) in $str, got $w instead")
+          case _                    => Validated.invalidNec(s"Input too short")
         },
-      expecting = s"int $int"
+      expecting = s"char $char"
     )
   }
 
-  def STRING(string: String): Parser[PString] = {
+  def CHAR_IN(chars: Set[Char]): ParserStE[Char] = {
     Parser(
-      (tokens: Seq[Token], idx: Int) =>
-        tokens.lift(idx) match {
-          case Some(TString(w)) if w == string => Validated.valid((idx + 1, PString(w)))
-          case Some(w)                         => Validated.invalidNec(s"Expected $string, got $w")
-          case _                               => tooShort
+      (str: String, idx: Int) =>
+        str.lift(idx) match {
+          case Some(w) if chars.contains(w) => Validated.valid((idx + 1, w))
+          case Some(w)                      => Validated.invalidNec(s"Missing $chars in $str, got $w instead")
+          case _                            => Validated.invalidNec(s"Input too short")
         },
-      expecting = s"$string"
+      expecting = s"chars in $chars"
     )
   }
 
-  def ANY_STRING(): Parser[PString] = {
-    Parser(
-      (tokens: Seq[Token], idx: Int) =>
-        tokens.lift(idx) match {
-          case Some(TString(w)) => Validated.valid((idx + 1, PString(w)))
-          case _                => tooShort
-        },
-      expecting = s"Any string"
-    )
+  // Consume all WS and return a single one
+  def WS1: ParserStE[Char] = REPEAT(ANY_OF(" \t\r\n".map(c => CHAR(c)))).as(' ')
+  // Consume all WS and return a string of all
+  def WSS: ParserStE[String] = REPEAT(ANY_OF(" \t\r\n".map(c => CHAR(c)))).map(_.mkString)
+
+  def ALPHA(): ParserStE[Char] = {
+    ANY_OF((('a' to 'z') ++ ('A' to 'Z')).map(CHAR))
   }
 
-  def IDENT(ident: String): Parser[PString] = {
-    Parser(
-      (tokens: Seq[Token], idx: Int) =>
-        tokens.lift(idx) match {
-          case Some(TIdent(w)) if w == ident => Validated.valid((idx + 1, PString(w)))
-          case Some(w)                       => Validated.invalidNec(s"Expected IDENT $ident, got $w")
-          case _                             => tooShort
-        },
-      expecting = s"$ident"
-    )
-  }
+  def DIGIT(): ParserStE[Char] = ANY_OF(('0' to '9').map(CHAR))
 
-  def SYMBOL(symbol: String): Parser[PString] = {
-    Parser(
-      (tokens: Seq[Token], idx: Int) =>
-        tokens.lift(idx) match {
-          case Some(TSymbol(w)) if w == symbol => Validated.valid((idx + 1, PString(w)))
-          case Some(w)                         => Validated.invalidNec(s"Expected $symbol, got $w")
-          case _                               => tooShort
-        },
-      expecting = s"$symbol"
-    )
-  }
+  def WORD(): ParserStE[String] = REPEAT(ANY_OF(Seq(ALPHA(), DIGIT()))).map(_.mkString)
 
-  import ParserImplicit.given
+  def WORD(string: String): ParserStE[String] =
+    SEQ(string.toCharArray.map(CHAR).head, string.toCharArray.map(CHAR).tail*).map(_.toSeq.mkString)
 
-  def SEQ[T](head: Parser[? <: T], tail: Parser[? <: T]*): Parser[PNeSeq[T]] = {
-    tail.foldLeft(head.map(PNeSeq.one)) { (acc, parser) =>
+  // catch WORDs and whitespaces that are after
+  def WORD_WS(): ParserStE[String]             = SEQ(WORD(), WSS).map(_.toSeq.mkString)
+  def WORD_WS(word: String): ParserStE[String] = SEQ(WORD(word), WSS).map(_.toSeq.mkString)
+
+  def WORD_WS0(): ParserStE[String]             = BEFORE(WORD(), WSS).map(_.toSeq.mkString)
+  def WORD_WS0(word: String): ParserStE[String] = BEFORE(WORD(word), WSS).map(_.toSeq.mkString)
+
+  def WORDS(): ParserStE[String]                       = REPEAT(WORD_WS()).map(_.mkString)
+  def QUOTED_STRING()                                  = BETWEEN(CHAR('"'), WORDS(), CHAR('"'))
+  def QUOTED_STRING(string: String): ParserStE[String] = BETWEEN(CHAR('"'), WORD(string), CHAR('"'))
+
+  def SEQ[T, B](head: ParserStE[? <: T], tail: ParserStE[? <: T]*): ParserStE[NonEmptySeq[T]] = {
+    tail.foldLeft(head.map(NonEmptySeq.one)) { (acc, parser) =>
       for {
         seq <- acc
         b   <- parser
@@ -155,26 +130,65 @@ object Combinators {
     }
   }
 
-  def LOOP[T](parser: Parser[T], minIteration: Int = 0): Parser[PSeq[T]] = {
+  def REPEAT_SEPARATOR[T, T2](
+      parser: ParserStE[T],
+      separator: ParserStE[T2],
+      minIteration: Int = 0
+  ): ParserStE[Seq[T]] = {
+
     @tailrec
-    def loop(tokens: Seq[Token], idx: Int, acc: List[T], roundToMakeMin: Int): ParseResult[PSeq[T]] = {
+    def loop(tokens: String, idx: Int, acc: List[T], remainingMin: Int): ParseResult[String, Seq[T]] = {
       parser(tokens, idx) match {
         case Valid((nextIdx, value)) =>
-          loop(tokens, nextIdx, value :: acc, roundToMakeMin - 1)
-        case Invalid(e) if roundToMakeMin <= 0 =>
-          Valid((idx, PSeq(acc.reverse)))
-        case inv @ Invalid(_) =>
-          Invalid(NonEmptyChain(s"Not enough iteration of ${parser.expecting}. Expecting $minIteration iteration"))
+          separator(tokens, nextIdx) match {
+            case Valid((sepNextIdx, _)) =>
+              loop(tokens, sepNextIdx, value :: acc, remainingMin - 1)
+            case Invalid(_) if remainingMin <= 0 =>
+              Valid((nextIdx, (value :: acc).reverse))
+            case Invalid(_) =>
+              Invalid(NonEmptyChain.one(s"Expected at least $minIteration repetitions of ${parser.expecting}"))
+          }
+
+        case Invalid(_) if remainingMin <= 0 =>
+          Valid((idx, acc.reverse))
+
+        case Invalid(_) =>
+          Invalid(NonEmptyChain.one(s"Expected at least $minIteration repetitions of ${parser.expecting}"))
       }
     }
 
-    Parser((tokens, idx) => loop(tokens, idx, Nil, minIteration), expecting = s"Loop of ${parser.expecting}")
+    Parser((tokens, idx) => loop(tokens, idx, Nil, minIteration), expecting = s"loop of ${parser.expecting}")
+  }
+
+  def REPEAT[T](parser: ParserStE[T], minIteration: Int = 0): ParserStE[Seq[T]] = {
+    Parser(
+      (tokens, startIdx) => {
+        @tailrec
+        def loop(idx: Int, acc: List[T], remainingMin: Int): ParseResult[String, Seq[T]] = {
+          parser(tokens, idx) match {
+            case Valid((nextIdx, value)) =>
+              if (nextIdx == idx) {
+                // Prevent infinite loop
+                Valid((idx, acc.reverse))
+              } else {
+                loop(nextIdx, value :: acc, remainingMin - 1)
+              }
+            case Invalid(_) if remainingMin <= 0 =>
+              Valid((idx, acc.reverse))
+            case inv @ Invalid(_) =>
+              inv
+          }
+        }
+        loop(startIdx, Nil, minIteration)
+      },
+      expecting = s"Loop of ${parser.expecting}"
+    )
   }
 
   // TODO opimize
-  def ANY_OF[T](parsers: Seq[Parser[T]]): Parser[T] = {
+  def ANY_OF[T](parsers: Seq[ParserStE[T]]): ParserStE[T] = {
     Parser(
-      (tokens: Seq[Token], idx: Int) => {
+      (tokens: String, idx: Int) => {
         parsers.find(p => p(tokens, idx).isValid) match {
           case Some(p) => p(tokens, idx)
           case None =>
@@ -187,21 +201,21 @@ object Combinators {
     )
   }
 
-  def OPTION[T](parser: Parser[T]): Parser[POption[T]] = {
+  def OPTION[T](parser: ParserStE[T]): ParserStE[Option[T]] = {
     Parser(
-      (tokens: Seq[Token], idx: Int) => {
+      (tokens: String, idx: Int) => {
         parser(tokens, idx) match {
-          case Validated.Valid((next, v)) => Validated.valid((next, POption(Option(v))))
-          case Validated.Invalid(_)       => Validated.valid((idx, POption(None)))
+          case Validated.Valid((next, v)) => Validated.valid((next, Option(v)))
+          case Validated.Invalid(_)       => Validated.valid((idx, None))
         }
       },
       expecting = s"Optional ${parser.expecting}"
     )
   }
 
-  def EOS[T]: Parser[Unit] = {
+  def EOS: ParserStE[Unit] = {
     Parser(
-      (tokens: Seq[Token], idx: Int) => {
+      (tokens: String, idx: Int) => {
         if (idx == tokens.length) Validated.valid((idx, ()))
         else Validated.invalidNec(s"expected EOS, got ${tokens(idx)}")
       },
@@ -209,30 +223,20 @@ object Combinators {
     )
   }
 
-  def TUPLE[Parsers <: Tuple, Results <: Tuple](parsers: Parsers)(using
-      seq: TupleSequencer[Parsers, Results]
-  ): Parser[Results] = seq.apply(parsers)
+  import cats.syntax.semigroupal.*
 
-  trait TupleSequencer[Parsers <: Tuple, Results <: Tuple] {
-    def apply(parsers: Parsers): Parser[Results]
+  def TUPLE[T1, T2](p1: ParserStE[T1], p2: ParserStE[T2]): ParserStE[(T1, T2)] = {
+    p1 product p2
   }
 
-  object TupleSequencer {
+  def BETWEEN[T1, T2, T3](p1: ParserStE[T1], p2: ParserStE[T2], p3: ParserStE[T3]): ParserStE[T2] = for {
+    _   <- p1
+    res <- p2
+    _   <- p3
+  } yield res
 
-    import cats.syntax.apply.*
-
-    given empty: TupleSequencer[EmptyTuple, EmptyTuple] {
-      def apply(parsers: EmptyTuple): Parser[EmptyTuple] = EmptyTuple.pure
-    }
-
-    given cons[H, T <: Tuple, RT <: Tuple](using
-        tail: TupleSequencer[T, RT]
-    ): TupleSequencer[Parser[H] *: T, H *: RT] with
-      def apply(parsers: Parser[H] *: T): Parser[H *: RT] = {
-        val head       = parsers.head
-        val tailParsed = tail(parsers.tail)
-        (head, tailParsed).mapN(_ *: _)
-      }
-
-  }
+  def BEFORE[T1, T2](before: ParserStE[T1], after: ParserStE[T2]): ParserStE[T1] = for {
+    r1 <- before
+    _  <- after
+  } yield r1
 }
