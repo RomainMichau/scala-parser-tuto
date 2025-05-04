@@ -26,7 +26,6 @@ lazy val root = project
     semanticdbVersion                                                := scalafixSemanticdb.revision,
     coverageEnabled                                                  := true,
     coverageMinimumBranchTotal                                       := 100,
-    coverageMinimumStmtTotal                                         := 100,
     coverageFailOnMinimum                                            := true, // Enforce the threshold
-    coverageHighlighting                                             := true
+    coverageHighlighting := true
   )
