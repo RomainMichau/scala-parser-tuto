@@ -1,6 +1,7 @@
 package com.rmichau.scalaparser.instances
 
-import com.rmichau.scalaparser.Combinators._
+import com.rmichau.scalaparser.Combinators.*
+import com.rmichau.scalaparser.Parsers.*
 
 object DateParser {
 
