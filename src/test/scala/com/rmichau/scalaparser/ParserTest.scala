@@ -1,6 +1,7 @@
 package com.rmichau.scalaparser
 
 import com.rmichau.scalaparser.Combinators.*
+import com.rmichau.scalaparser.Parsers.*
 import com.rmichau.scalaparser.TestCommon.*
 
 // For more information on writing tests, see
