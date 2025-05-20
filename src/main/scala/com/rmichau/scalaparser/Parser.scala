@@ -95,17 +95,17 @@ object Combinators {
   }
 
   // Consume all WS and return a single one
-  def WS1: ParserStE[Char] = REPEAT(ANY_OF(" \t\r\n".map(c => CHAR(c)))).as(' ')
+  def WS1: ParserStE[Char] = REPEAT(ONE_OF(" \t\r\n".map(c => CHAR(c)))).as(' ')
   // Consume all WS and return a string of all
-  def WSS: ParserStE[String] = REPEAT(ANY_OF(" \t\r\n".map(c => CHAR(c)))).map(_.mkString)
+  def WSS: ParserStE[String] = REPEAT(ONE_OF(" \t\r\n".map(c => CHAR(c)))).map(_.mkString)
 
   def ALPHA(): ParserStE[Char] = {
-    ANY_OF((('a' to 'z') ++ ('A' to 'Z')).map(CHAR))
+    ONE_OF((('a' to 'z') ++ ('A' to 'Z')).map(CHAR))
   }
 
-  def DIGIT(): ParserStE[Char] = ANY_OF(('0' to '9').map(CHAR))
+  def DIGIT(): ParserStE[Char] = ONE_OF(('0' to '9').map(CHAR))
 
-  def WORD(): ParserStE[String] = REPEAT(ANY_OF(Seq(ALPHA(), DIGIT()))).map(_.mkString)
+  def WORD(): ParserStE[String] = REPEAT(ONE_OF(Seq(ALPHA(), DIGIT()))).map(_.mkString)
 
   def WORD(string: String): ParserStE[String] =
     SEQ(string.toCharArray.map(CHAR).head, string.toCharArray.map(CHAR).tail*).map(_.toSeq.mkString)
@@ -131,8 +131,8 @@ object Combinators {
   }
 
   def REPEAT_SEPARATOR[T, T2](
-      parser: ParserStE[T],
-      separator: ParserStE[T2],
+      parser: => ParserStE[T],
+      separator: => ParserStE[T2],
       minIteration: Int = 0
   ): ParserStE[Seq[T]] = {
 
@@ -186,7 +186,7 @@ object Combinators {
   }
 
   // TODO opimize
-  def ANY_OF[T](parsers: Seq[ParserStE[T]]): ParserStE[T] = {
+  def ONE_OF[T](parsers: => Seq[ParserStE[? <: T]]): ParserStE[T] = {
     Parser(
       (tokens: String, idx: Int) => {
         parsers.find(p => p(tokens, idx).isValid) match {

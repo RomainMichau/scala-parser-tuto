@@ -1,36 +1,59 @@
-//package com.rmichau.scalaparser.instances
-//
-//import cats.syntax.functor.*
-//import com.rmichau.scalaparser.Combinators.*
-//import com.rmichau.scalaparser.*
-//import com.rmichau.scalaparser.ParserImplicit.given
-//
-//object JSONParser {
-//  trait JObject
-//
-//  case class JString(value: String) extends JObject
-//
-//  case class JKey(key: String) extends JObject
-//
-//  case class JElem(key: String, value: JObject) extends JObject
-//
-//  case class JArray(seq: Seq[JObject]) extends JObject
-//
-//  case class JDict(map: Map[JKey, JObject]) extends JObject
-//
-//  case class JBool(value: Boolean) extends JObject
-//
-//  case class JInt(value: Int) extends JObject
-//
-//  val COMMA: ParserStE[PString]                   = SYMBOL(",")
-//  val OBRACE: ParserStE[PString]                  = SYMBOL("{")
-//  val CBRACE: ParserStE[PString]                  = SYMBOL("}")
-//  val CSOBRACE: ParserStE[PString]                = SYMBOL("[")
-//  val CSQBRACE: ParserStE[PString]                = SYMBOL("]")
-//  val JKEY: ParserStE[JKey]                       = TUPLE(ANY_STRING(), SYMBOL(":")).map { (key, _) => JKey(key.value) }
-//  val JSTRING: ParserStE[JString]                 = ANY_STRING().map { case PString(value) => JString(value) }
-//  val STRING_COMMA: ParserStE[(JString, PString)] = TUPLE(JSTRING, COMMA)
-////  val JARRAY = TUPLE(CSOBRACE, OPTION(REPEAT(STRING_COMMA)), JSTRING, CSQBRACE).map((_, b, c, _) => {
-////    JArray(b.value.map(seq => seq.value.map((v1, _) => v1)).getOrElse(Seq()) :+ c)
-////  })
-//}
+package com.rmichau.scalaparser.instances
+
+import cats.syntax.functor.*
+import com.rmichau.scalaparser.Combinators.*
+import com.rmichau.scalaparser.*
+import com.rmichau.scalaparser.ParserImplicit.given
+
+object JSONParser {
+  trait JObject
+
+  case class JSTRING(value: String) extends JObject
+
+  case class JKEY(key: String) extends JObject
+
+  case class JElem(key: String, value: JObject) extends JObject
+
+  case class JArray(seq: Seq[JObject]) extends JObject
+
+  case class JDict(map: Map[JKEY, JObject]) extends JObject
+
+  case class JBool(value: Boolean) extends JObject
+
+  case class JInt(value: Int) extends JObject
+
+  def defer[E, R](thunk: => Parser[E, R]): Parser[E, R] =
+    Parser((str, idx) => thunk.f(str, idx), thunk.expecting)
+
+
+  val keyP: ParserStE[JKEY]              = BEFORE(QUOTED_STRING(), WORD_WS0(":")).map(s => JKEY(s))
+  val stringP: ParserStE[JSTRING]        = QUOTED_STRING().map(s => JSTRING(s))
+  val objectP = ONE_OF[JObject](Seq(stringP, defer(arrayP), defer(dictP)))
+
+  lazy val entryP: ParserStE[(JKEY, JObject)] = TUPLE(keyP, objectP)
+  lazy val arrayP: ParserStE[JArray] =
+    BETWEEN(WORD_WS0("["), REPEAT_SEPARATOR(objectP, WORD_WS0(",")), WORD_WS0("[")).map(s => JArray(s))
+  lazy val dictP  = BETWEEN(WORD_WS0("{"), REPEAT_SEPARATOR(entryP, WORD_WS0(",")), WORD_WS0("}")).map(s => JDict(s.toMap))
+  lazy val Parserr = objectP
+
+  val input =
+    """
+      |{
+      |  "name": "Alice",
+      |  "status": "active",
+      |  "tags": ["admin", "editor", "reviewer"],
+      |  "profile": {
+      |    "firstName": "Alice",
+      |    "lastName": "Smith",
+      |    "location": "Wonderland"
+      |  }
+      |}
+      |
+      |""".stripMargin.replaceAll("\\s", "")
+
+  def main(args: Array[String]): Unit = {
+    println(Parserr(input))
+  }
+}
+
+

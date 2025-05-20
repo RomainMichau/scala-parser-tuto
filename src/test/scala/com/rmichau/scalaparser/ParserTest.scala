@@ -45,7 +45,6 @@ class ParserTest extends munit.FunSuite {
 
   test("WORDS") {
     WORDS()("these  are several   words").assertSuccess("these  are several   words")
-    println(WORDS().expecting)
   }
 
   test("BETWEEN") {
@@ -65,8 +64,8 @@ class ParserTest extends munit.FunSuite {
   }
 
   test("or") {
-    val helloOrWorld = ANY_OF(Seq(QUOTED_STRING("hello"), QUOTED_STRING("world")))
-    helloOrWorld("\"hello\" \"world\" my name is Romain", 0).assertSuccess()
+    val helloOrWorld = ONE_OF(Seq(QUOTED_STRING("hello"), QUOTED_STRING("world")))
+    helloOrWorld("\"hello\" \"world\" my name is Romain", 0 ).assertSuccess()
     helloOrWorld("\"hello\" \"world\" my name is Romain", 1).assertFailure()
     helloOrWorld("\"hello\" \"world\" my name is Romain", 3).assertFailure()
   }
@@ -101,7 +100,7 @@ class ParserTest extends munit.FunSuite {
     loopParser("\"hello\" \"world\" my name is romain", 0).assertSuccess()
     loopParser3(toTokens("hello hello hello romain"), 0).assertSuccess()
     loopParser4(toTokens("hello hello hello romain"), 0).assertFailure()
-    val loopComplex = REPEAT(SEQ(ANY_OF(Seq(WORD_WS("hello"), WORD_WS("hi"))), WORD_WS("romain")), 2)
+    val loopComplex = REPEAT(SEQ(ONE_OF(Seq(WORD_WS("hello"), WORD_WS("hi"))), WORD_WS("romain")), 2)
     loopComplex(toTokens("hello romain"), 0).assertFailure()
     loopComplex(toTokens("hello romain hello romain"), 0).assertSuccess()
     loopComplex(toTokens("hi romain hello romain hi romain"), 0).assertSuccess()
